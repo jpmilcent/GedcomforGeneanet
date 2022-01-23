@@ -32,6 +32,7 @@ Extends GedcomWriter to include common non-compliant GEDCOM additions.
 import os
 import time
 import io
+import re
 
 #------------------------------------------------------------------------
 #
@@ -399,8 +400,8 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
             if len(alt_names) > 0:
                 text = _("Alternate name for place") + '\n'.join(alt_names)
                 self._writeln(2, 'NOTE' , text )
-        else:
-            LOG.debug(" PAS PLACENOTE")
+        # else:
+        #     LOG.debug(" PAS PLACENOTE")
         self._note_references(place.get_note_list(), level + 1)
 
     def display_alt_names(self, place):
@@ -772,14 +773,16 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
             if source.get_title():
                 self._writeln(1, 'TITL', source.get_title())
 
-            if source.get_author():
-                self._writeln(1, "AUTH", source.get_author())
+            # Don't display other infos for Geneanet sources
+            if not source.get_title().startswith('Geneanet'):
+                if source.get_author():
+                    self._writeln(1, "AUTH", source.get_author())
 
-            if source.get_publication_info():
-                self._writeln(1, "PUBL", source.get_publication_info())
+                if source.get_publication_info():
+                    self._writeln(1, "PUBL", source.get_publication_info())
 
-            if source.get_abbreviation():
-                self._writeln(1, 'ABBR', source.get_abbreviation())
+                if source.get_abbreviation():
+                    self._writeln(1, 'ABBR', source.get_abbreviation())
 
             self._photos(source.get_media_list(), 1)
 
@@ -810,7 +813,7 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                 if person:
                     for ref in person.get_event_ref_list():
                         devel = 2
-                        if (ref.ref == event.handle): 
+                        if (ref.ref == event.handle):
                             role = int(ref.get_role())
                             if int(ref.get_role()) in [EventRoleType.WITNESS,EventRoleType.CELEBRANT, EventRoleType.INFORMANT, EventRoleType.AIDE ,EventRoleType.CLERGY, EventRoleType.AIDE,EventRoleType.FAMILY,EventRoleType.CUSTOM]:
                                 level = 2
@@ -819,16 +822,30 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                                 self._writeln(level+1, "TYPE", "INDI")
                                 self._writeln(level+1, "RELA", "Witness")
                                 if self.extended_role:
+                                    text = []
                                     if role:
-                                        self._writeln(level+1, "NOTE", '\xA0%s' % EventRoleType._DATAMAP[rol][1])
+                                        text.append(EventRoleType._DATAMAP[rol][1])
                                     else:
-                                        self._writeln(level+1, "NOTE", '\xA0%s' % str(ref.role))
+                                        text.append(str(ref.role))
+                                    
+                                    # Add all attributes in note
+                                    for attr in ref.get_attribute_list():
+                                        text.append(f"{attr.get_type()} : {attr.get_value()}")
+
+                                    self._writeln(level+1, "NOTE", '\xA0%s' % ' ; '.join(text))
                                 self._note_references(ref.get_note_list(), level+1)
 
     def _process_person_event(self, person ,event ,event_ref):
         """
         Write the witnesses associated with other personnal event.
         """
+        # Remove string "Profession ...:" before work name
+        if event.get_description().startswith('Profession '):
+            description = event.get_description()
+            new_description = re.sub('Profession[^:]+:', '', description).strip()
+            new_description = new_description[0].upper() + new_description[1:]
+            event.set_description(new_description)
+            
         super(GedcomWriterforGeneanet, self)._process_person_event(person, event , event_ref)
         etype = int(event.get_type())
         # if the event is a birth or death, skip it.
@@ -881,10 +898,18 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                                     self._writeln(level+1, "TYPE", "INDI")
                                     self._writeln(level+1, "RELA", "Witness")
                                     if self.extended_role:
+                                        text = []
                                         if role:
-                                            self._writeln(level+1, "NOTE", '\xA0%s' % EventRoleType._DATAMAP[rol][1])
+                                            text.append(EventRoleType._DATAMAP[rol][1])
                                         else:
-                                            self._writeln(level+1, "NOTE", '\xA0%s' % str(ref.role))
+                                            text.append(str(ref.role))
+                                        
+                                        # Add all attributes in a note
+                                        for attr in ref.get_attribute_list():
+                                            text.append(f"{attr.get_type()} : {attr.get_value()}")
+
+                                        self._writeln(level+1, "NOTE", '\xA0%s' % ' ; '.join(text))
+                                    
                                     self._note_references(ref.get_note_list(), level+1)
 
     def _dump_event_stats(self, event, event_ref):
@@ -925,8 +950,13 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                 self._writeln(2, 'EMAIL', attr.get_value())
             elif attr_type == _("WWW"):
                 self._writeln(2, 'WWW', attr.get_value())
+            elif attr_type == 'URL':
+                # Add URL attribute as source
+                self._writeln(2, 'SOUR', attr.get_value(), limit=100)
+            else:
+                # Add all other attributes in a note
+                self._writeln(2, 'NOTE', f"{attr_type} : {attr.get_value()}")
 
-        resultstring = ""
         for attr in event_ref.get_attribute_list():
             attr_type = attr.get_type()
             if attr_type == AttributeType.AGE:
@@ -937,6 +967,9 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
             elif attr_type == AttributeType.MOTHER_AGE:
                 self._writeln(2, 'WIFE')
                 self._writeln(3, 'AGE', attr.get_value())
+            else:
+                # Add all other attributes in a note
+                self._writeln(2, 'NOTE', f"{attr_type} : {attr.get_value()}")
             
         etype = int(event.get_type())
         if self.inccensus and etype == EventType.CENSUS:
