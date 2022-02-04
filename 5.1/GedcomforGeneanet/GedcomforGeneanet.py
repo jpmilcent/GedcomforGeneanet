@@ -522,7 +522,7 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
             firstname = name.first_name.strip()
         return firstname
 
-    
+
     def _person_name(self, name, attr_nick):
         """
         n NAME <NAME_PERSONAL> {1:1}
@@ -674,7 +674,7 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
         Overloaded media-handling method to skip over media
         if not included.
         """
-#        LOG.debug("deb photo %d" % self.relativepath)
+        # LOG.debug("deb photo %d" % self.relativepath)
         if self.include_media:
             photo_obj_id = photo.get_reference_handle()
             photo_obj = self.dbase.get_media_from_handle(photo_obj_id)
@@ -702,7 +702,6 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                         self._packzip(fullpath)
                     else:
                         self._packzip(path)
- 
  
     def _packzip(self, path ):
         if path:
@@ -835,7 +834,7 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                                     self._writeln(level+1, "NOTE", '\xA0%s' % ' ; '.join(text))
                                 self._note_references(ref.get_note_list(), level+1)
 
-    def _process_person_event(self, person ,event ,event_ref):
+    def _process_person_event(self, person, event, event_ref):
         """
         Write the witnesses associated with other personnal event.
         """
@@ -912,6 +911,41 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
                                     
                                     self._note_references(ref.get_note_list(), level+1)
 
+    def _add_sources(self, event, level):
+        # WARNING : URL attributes and media muste be in same order !
+        # TODO : find a better way to associate URL attribute and media description
+
+        sources = []
+        # Process attributes URL
+        for attr in event.get_attribute_list():
+            if attr.get_type() == 'URL':
+                sources.append({
+                    'url': attr.get_value()
+                })
+
+        # Process photos descriptions
+        idx = 0
+        for photo in event.get_media_list():
+            photo_obj_id = photo.get_reference_handle()
+            photo_obj = self.dbase.get_media_from_handle(photo_obj_id)
+            if photo_obj:
+                if idx < len(sources):
+                    sources[idx]['reference'] = photo_obj.get_description()
+                else:
+                    sources.append({
+                        'reference': photo_obj.get_description()
+                    })
+                idx = idx + 1
+        
+        # Compile photo description and URL attribute as source
+        for source in sources:
+            description = []
+            if 'reference' in source:
+                description.append(source['reference'])
+            if 'url' in source:
+                description.append(source['url'])
+            self._writeln(level, 'SOUR', ' - '.join(description), limit=500)
+
     def _dump_event_stats(self, event, event_ref):
         """
         Write the event details for the event, using the event and event
@@ -920,6 +954,9 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
         GEDCOM does not make a distinction between the two.
 
         """
+        # Use photo description and event attribute URL as source
+        self._add_sources(event, 2)
+
         dateobj = event.get_date_object()
         self._date(2, dateobj)
         if self._datewritten:
@@ -951,8 +988,8 @@ class GedcomWriterforGeneanet(exportgedcom.GedcomWriter):
             elif attr_type == _("WWW"):
                 self._writeln(2, 'WWW', attr.get_value())
             elif attr_type == 'URL':
-                # Add URL attribute as source
-                self._writeln(2, 'SOUR', attr.get_value(), limit=100)
+                # DO NOTHING : already processed !
+                continue
             else:
                 # Add all other attributes in a note
                 self._writeln(2, 'NOTE', f"{attr_type} : {attr.get_value()}")
